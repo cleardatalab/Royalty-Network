@@ -1,25 +1,42 @@
 import os
+import sys
+import glob
 import pandas as pd  # type: ignore
 import tkinter as tk
 from tkinter import filedialog, messagebox
 from tkinter.ttk import Progressbar
+
+# Function to get the base path, depending on whether it's a bundled executable or script
+def get_base_path():
+    if getattr(sys, 'frozen', False):
+        # If running as a bundled .exe, get the base path using sys._MEIPASS
+        return os.path.dirname(sys.executable)
+    else:
+        # If running as a script, use the current working directory
+        return os.getcwd()
 
 class LabelFillerApp:
     def __init__(self, root):
         self.root = root
         self.root.title("Missing Label Fill")  # Set the title of the application window
 
+        # Hardcoded path for CP files (set your own path here)
         self.cp_files_path = r"C:\Users\mshah\The Royalty Network\Share - Documents\MASTER ADMINISTRATOR FILE\DATA APPS\Monil Data Base (Don't Touch)"
-        self.cp_files = [
-            os.path.join(self.cp_files_path, "CP_1.csv"),  # Updated to handle Excel files
-            os.path.join(self.cp_files_path, "CP_2.csv")
-        ]
+        
+        # List of required CP files (adjust filenames as needed)
+        self.required_cp_files = ["CP_1.csv", "CP_2.csv"]
+
+        # Dynamically get the base path for CWR files
+        self.base_path = get_base_path()
+
+        # Get all xlsx files that contain 'CWR' in the name from the base path
+        self.cwr_files = [f for f in glob.glob(os.path.join(self.base_path, "*.xlsx")) if "CWR" in f]
 
         self.label_file = None  # Variable to store the chosen label file
         self.save_location = None  # Variable to store the chosen save location
 
-        self.setup_ui()  # Call the method to set up the UI components
-        self.check_files()  # Check for CP files
+        self.setup_ui()  # Set up the UI components
+        self.check_files()  # Check if necessary files exist
 
     def setup_ui(self):
         # UI components for displaying label file information
@@ -51,35 +68,30 @@ class LabelFillerApp:
         self.status_label.grid(row=8, column=0, padx=10, pady=5, columnspan=2)
 
     def check_files(self):
-        # Function to check for the existence of CP files and the label file
-        cp_files_found = []
-        all_files_exist = True  # Flag to track if all files exist
+        # Check if all required CP files exist
+        missing_files = [file for file in self.required_cp_files if not os.path.exists(os.path.join(self.cp_files_path, file))]
 
-        for cp_file in self.cp_files:
-            if os.path.exists(cp_file):
-                cp_files_found.append(os.path.basename(cp_file))  # Add found files to the list
-            else:
-                cp_files_found.append(f"{os.path.basename(cp_file)} (Not Found)")  # Indicate missing files
-                all_files_exist = False  # Set flag to False if any file is missing
-                
-            # Update the UI to show CP files found or not
-            if not all_files_exist:
-                messagebox.showwarning("Warning", "CP files not found: \n" + "\n".join(cp_files_found))
-                self.root.quit()
-
-        # Enable or disable the Run button based on file existence
-        if all_files_exist and self.label_file:
-            self.run_button.config(state=tk.NORMAL)  # Enable the Run button
-        else:
+        if missing_files:
+            # If any CP files are missing, show a message to the user
+            messagebox.showwarning("Missing Files", f"The following CP files are missing:\n" + "\n".join(missing_files))
             self.run_button.config(state=tk.DISABLED)  # Disable the Run button
+        else:
+            # Enable the Run button only if all required files are present
+            self.run_button.config(state=tk.NORMAL)
+
+        # Enable or disable the Run button based on the presence of the label file and CP files
+        if not self.label_file or missing_files:
+            self.run_button.config(state=tk.DISABLED)  # Disable the Run button if files are missing
 
     def choose_label_file(self):
-        # Function to choose the label file
-        label_file = filedialog.askopenfilename(filetypes=[("Excel files", "*.xlsx;*.xls")])  # Updated for Excel files
+        # Function to choose the label file (CSV or Excel)
+        label_file = filedialog.askopenfilename(filetypes=[("All Supported Files", "*.csv;*.xls;*.xlsx"),
+                                                           ("CSV files", "*.csv"),
+                                                           ("Excel files", "*.xls;*.xlsx")])
         if label_file:
             self.label_file = label_file  # Store the selected label file
             self.label_file_label.config(text=os.path.basename(label_file))  # Update the display
-            self.check_files()  # Check files again after choosing label file
+            self.check_files()  # Check if the required files exist after choosing label file
 
     def choose_save_location(self):
         # Function to choose a directory for saving output files
@@ -88,16 +100,6 @@ class LabelFillerApp:
             self.save_location = folder  # Store the selected directory
             self.save_location_label.config(text=folder)  # Update the display
             self.check_files()  # Check files again after choosing save location
-
-    def choose_label_file(self):
-        # Allow selection of CSV, XLS, and XLSX files
-        label_file = filedialog.askopenfilename(filetypes=[("All Supported Files", "*.csv;*.xls;*.xlsx"), 
-                                                        ("CSV files", "*.csv"), 
-                                                        ("Excel files", "*.xls;*.xlsx")])
-        if label_file:
-            self.label_file = label_file  # Store the selected label file
-            self.label_file_label.config(text=os.path.basename(label_file))  # Update the display
-            self.check_files()  # Check files again after choosing label file
 
     def process_files(self):
         if not self.save_location:
@@ -113,11 +115,15 @@ class LabelFillerApp:
             merged_data = pd.DataFrame()
 
             # Read the CP files in chunks and concatenate them
-            for cp_file in self.cp_files:
-                if os.path.exists(cp_file):
-                    self.status_label.config(text="Reading data from Counter Point...")  # Show "Counter Point"
-                    self.update()  # Update the UI
-                    merged_data = pd.read_csv(cp_file, on_bad_lines='skip')  # Read CSV file
+            for cp_file in self.required_cp_files:
+                cp_file_path = os.path.join(self.cp_files_path, cp_file)
+                if os.path.exists(cp_file_path):
+                    self.status_label.config(text=f"Reading data from {cp_file}...")  # Show which CP file
+                    self.root.update()  # Use root.update() to refresh the UI during processing
+                    cp_data = pd.read_csv(cp_file_path, on_bad_lines='skip')  # Read CSV file
+                    merged_data = pd.concat([merged_data, cp_data], ignore_index=True)  # Merge data
+                else:
+                    raise FileNotFoundError(f"CP file '{cp_file}' is missing.")  # If file is missing, raise error
 
             self.progress['value'] = 50  # Update progress
             self.status_label.config(text="Merging data...")  # Update status
@@ -137,7 +143,7 @@ class LabelFillerApp:
             # Check for the exact column names
             required_columns = ['Label Name', 'ISRC']
             if not all(col in label_data.columns for col in required_columns):
-                raise ValueError("Error: The file must include the columns 'Label Name' and 'ISRC' exactly as shown. Please check that the column names are spelled correctly and use the correct uppercase and lowercase letters.")  # Custom error
+                raise ValueError("The file must include the columns 'Label Name' and 'ISRC' exactly as shown.")  # Custom error
 
             # Fill missing Label Names based on the ISRC mapping
             label_data['Label Name'] = label_data['Label Name'].fillna(
@@ -150,22 +156,30 @@ class LabelFillerApp:
 
             self.progress['value'] = 100  # Complete progress
             self.status_label.config(text="Processing complete!")  # Update status
-            if messagebox.askokcancel("Success", f"Files processed and saved at {self.save_location}. Would you like to open the folder?"):
-                os.startfile(self.save_location)  # Open the save location in file explorer
+            if messagebox.askokcancel("Success", f"Files processed and saved at {output_file}.\nWould you like to open the folder?"):
+                os.startfile(self.save_location)  # Open folder if user agrees
 
-        except ValueError as ve:
-            messagebox.showerror("Error", str(ve))  # Show custom ValueError message
+        except FileNotFoundError as e:
+            messagebox.showerror("File Not Found", str(e))  # Show error message for missing files
+        except ValueError as e:
+            messagebox.showerror("Error", str(e))  # Show error message for missing columns
         except Exception as e:
-            messagebox.showerror("Error", "An unexpected error occurred. Contact Monil: " + str(e))  # Handle other exceptions
-            self.reset_app_state()  # Reset the application state
+            messagebox.showerror("Error", f"An unexpected error occurred: {str(e)}")  # General error handling
         finally:
-            self.progress.grid_remove()  # Hide the progress bar after processing
+            self.progress.grid_remove()  # Hide progress bar
+            self.status_label.config(text="")  # Reset status label
 
+    def reset_app_state(self):
+        # Reset the state of the app after an error
+        self.label_file = None
+        self.save_location = None
+        self.label_file_label.config(text="No file selected")
+        self.save_location_label.config(text="No location selected")
+        self.run_button.config(state=tk.DISABLED)  # Disable Run button
+        self.progress.grid_remove()  # Hide progress bar
+        self.status_label.config(text="")  # Reset status label
 
-    def update(self):
-        # Helper function to update the UI and process idle tasks
-        self.root.update_idletasks()
-
+# Run the application
 if __name__ == "__main__":
     root = tk.Tk()
     app = LabelFillerApp(root)
