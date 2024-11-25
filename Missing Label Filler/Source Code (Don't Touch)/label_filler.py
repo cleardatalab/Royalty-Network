@@ -1,10 +1,12 @@
 import os
 import sys
 import glob
+import threading  # Import threading module
 import pandas as pd  # type: ignore
 import tkinter as tk
 from tkinter import filedialog, messagebox
 from tkinter.ttk import Progressbar
+
 
 # Function to get the base path, depending on whether it's a bundled executable or script
 def get_base_path():
@@ -15,22 +17,17 @@ def get_base_path():
         # If running as a script, use the current working directory
         return os.getcwd()
 
+
 class LabelFillerApp:
     def __init__(self, root):
         self.root = root
         self.root.title("Missing Label Fill")  # Set the title of the application window
 
-        # Hardcoded path for CP files (set your own path here)
-        self.cp_files_path = r"C:\Users\mshah\The Royalty Network\Share - Documents\MASTER ADMINISTRATOR FILE\DATA APPS\Monil Data Base (Don't Touch)"
-        
-        # List of required CP files (adjust filenames as needed)
+        # Dynamically construct the CP files path by replacing the device name
+        self.cp_files_path = os.path.join(os.path.expanduser("~"), r"The Royalty Network\Share - Documents\MASTER ADMINISTRATOR FILE\DATA APPS\Monil Data Base (Don't Touch)")
+
+        # List of required CP files
         self.required_cp_files = ["CP_1.csv", "CP_2.csv"]
-
-        # Dynamically get the base path for CWR files
-        self.base_path = get_base_path()
-
-        # Get all xlsx files that contain 'CWR' in the name from the base path
-        self.cwr_files = [f for f in glob.glob(os.path.join(self.base_path, "*.xlsx")) if "CWR" in f]
 
         self.label_file = None  # Variable to store the chosen label file
         self.save_location = None  # Variable to store the chosen save location
@@ -49,14 +46,14 @@ class LabelFillerApp:
 
         # Button for choosing the label file
         tk.Button(self.root, text="Choose Label File", command=self.choose_label_file).grid(row=4, column=0, padx=10, pady=5)
-        
+
         # Button for choosing the save location
         tk.Button(self.root, text="Choose Save Location", command=self.choose_save_location).grid(row=4, column=1, padx=10, pady=5)
         self.save_location_label = tk.Label(self.root, text="No location selected")
         self.save_location_label.grid(row=5, column=0, padx=10, pady=5, columnspan=2, sticky='we')
 
         # Button to run the file processing
-        self.run_button = tk.Button(self.root, text="Run", command=self.process_files, state=tk.DISABLED)
+        self.run_button = tk.Button(self.root, text="Run", command=self.start_processing, state=tk.DISABLED)
         self.run_button.grid(row=6, column=0, padx=10, pady=10, columnspan=2)
 
         # Progress bar for indicating processing status
@@ -68,7 +65,7 @@ class LabelFillerApp:
         self.status_label.grid(row=8, column=0, padx=10, pady=5, columnspan=2)
 
     def check_files(self):
-        # Check if all required CP files exist
+        # Check if all required CP files are available
         missing_files = [file for file in self.required_cp_files if not os.path.exists(os.path.join(self.cp_files_path, file))]
 
         if missing_files:
@@ -101,6 +98,10 @@ class LabelFillerApp:
             self.save_location_label.config(text=folder)  # Update the display
             self.check_files()  # Check files again after choosing save location
 
+    def start_processing(self):
+        # Start the file processing in a separate thread
+        threading.Thread(target=self.process_files, daemon=True).start()
+
     def process_files(self):
         if not self.save_location:
             messagebox.showerror("Error", "Please select a save location.")  # Error if no save location
@@ -114,12 +115,10 @@ class LabelFillerApp:
             # Initialize an empty DataFrame for merging
             merged_data = pd.DataFrame()
 
-            # Read the CP files in chunks and concatenate them
+            # Read the CP files and concatenate them
             for cp_file in self.required_cp_files:
                 cp_file_path = os.path.join(self.cp_files_path, cp_file)
                 if os.path.exists(cp_file_path):
-                    self.status_label.config(text=f"Reading data from {cp_file}...")  # Show which CP file
-                    self.root.update()  # Use root.update() to refresh the UI during processing
                     cp_data = pd.read_csv(cp_file_path, on_bad_lines='skip')  # Read CSV file
                     merged_data = pd.concat([merged_data, cp_data], ignore_index=True)  # Merge data
                 else:
@@ -127,9 +126,6 @@ class LabelFillerApp:
 
             self.progress['value'] = 50  # Update progress
             self.status_label.config(text="Merging data...")  # Update status
-
-            # Strip whitespace from column names in merged_data
-            merged_data.columns = merged_data.columns.str.strip()
 
             # Read the label file based on its format
             if self.label_file.endswith('.csv'):
@@ -162,24 +158,15 @@ class LabelFillerApp:
         except FileNotFoundError as e:
             messagebox.showerror("File Not Found", str(e))  # Show error message for missing files
         except ValueError as e:
-            messagebox.showerror("Error", str(e))  # Show error message for missing columns
+            messagebox.showerror("Error", str(e))  # Show error message for invalid data
         except Exception as e:
-            messagebox.showerror("Error", f"An unexpected error occurred: {str(e)}")  # General error handling
+            messagebox.showerror("Error", f"An unexpected error occurred:\n{str(e)}")  # Show generic error message
         finally:
-            self.progress.grid_remove()  # Hide progress bar
-            self.status_label.config(text="")  # Reset status label
+            self.progress.grid_remove()  # Hide the progress bar after completion
+            self.progress['value'] = 0  # Reset progress value
 
-    def reset_app_state(self):
-        # Reset the state of the app after an error
-        self.label_file = None
-        self.save_location = None
-        self.label_file_label.config(text="No file selected")
-        self.save_location_label.config(text="No location selected")
-        self.run_button.config(state=tk.DISABLED)  # Disable Run button
-        self.progress.grid_remove()  # Hide progress bar
-        self.status_label.config(text="")  # Reset status label
 
-# Run the application
+# Main application runner
 if __name__ == "__main__":
     root = tk.Tk()
     app = LabelFillerApp(root)
