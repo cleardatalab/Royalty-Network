@@ -73,11 +73,11 @@ def split_file():
     print("Loading file...")
     try:
         if splitter_file.endswith('.tsv'):
-            df = pd.read_csv(splitter_file, sep='\t', low_memory=False)
+            df = pd.read_csv(splitter_file, sep='\t', encoding='latin1', low_memory=False)
         elif splitter_file.endswith('.csv'):
-            df = pd.read_csv(splitter_file, low_memory=False)
+            df = pd.read_csv(splitter_file, encoding='latin1', low_memory=False)
         else:
-            df = pd.read_excel(splitter_file, engine='openpyxl')
+            df = pd.read_excel(splitter_file, encoding='latin1', engine='openpyxl')
     except pd.errors.EmptyDataError:
         print("Error: The file is empty. Exiting...")
         time.sleep(5)  # Wait for 5 seconds before exiting
