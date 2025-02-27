@@ -4,6 +4,85 @@ import csv
 import time
 import os
 from datetime import datetime
+from google.cloud import bigquery
+from google.cloud.exceptions import NotFound
+
+# ---------------------------
+# BigQuery Table Validation
+# ---------------------------
+def validate_and_create_table(client, project_id, dataset_id, table_name):
+    table_id = f"{project_id}.{dataset_id}.{table_name}"
+    expected_schema = [
+        bigquery.SchemaField("Album ID", "STRING"),
+        bigquery.SchemaField("Album Name", "STRING"),
+        bigquery.SchemaField("Artist Name", "STRING"),
+        bigquery.SchemaField("Track Name", "STRING"),
+        bigquery.SchemaField("Playcount", "INTEGER"),
+        bigquery.SchemaField("URI", "STRING"),
+        bigquery.SchemaField("UID", "STRING"),
+        bigquery.SchemaField("Release Date", "STRING"),
+        bigquery.SchemaField("Timestamp", "TIMESTAMP"),
+        bigquery.SchemaField("Track ID", "STRING"),
+        bigquery.SchemaField("Song Name", "STRING"),
+        bigquery.SchemaField("Performed by", "STRING"),
+        bigquery.SchemaField("Written by", "STRING"),
+        bigquery.SchemaField("Produced by", "STRING"),
+        bigquery.SchemaField("Source", "STRING"),
+    ]
+    
+    try:
+        table = client.get_table(table_id)
+        # Check if the table schema matches expected schema
+        actual_columns = set(field.name for field in table.schema)
+        expected_columns = set(field.name for field in expected_schema)
+        if actual_columns != expected_columns:
+            print("Table schema does not match expected schema. Recreating table...")
+            client.delete_table(table_id, not_found_ok=True)
+            table = bigquery.Table(table_id, schema=expected_schema)
+            table = client.create_table(table)
+            print(f"Table {table_id} created with updated schema.")
+        else:
+            print(f"Table {table_id} already exists and schema is valid.")
+    except NotFound:
+        print("Table not found. Creating new table...")
+        table = bigquery.Table(table_id, schema=expected_schema)
+        table = client.create_table(table)
+        print(f"Table {table_id} created.")
+    return table
+
+def safe_playcount(value):
+    try:
+        return int(value)
+    except:
+        return 0
+
+def load_data_to_bigquery(final_data, client, project_id, dataset_id, table_name):
+    table_id = f"{project_id}.{dataset_id}.{table_name}"
+    rows_to_insert = []
+    for record in final_data:
+        row = {
+            "Album ID": record.get("Album ID", "-"),
+            "Album Name": record.get("Album Name", "-"),
+            "Artist Name": record.get("Artist Name", "-"),
+            "Track Name": record.get("Track Name", "-"),
+            "Playcount": safe_playcount(record.get("Playcount")),
+            "URI": record.get("URI", "-"),
+            "UID": record.get("UID", "-"),
+            "Release Date": record.get("Release Date", "-"),
+            "Timestamp": record.get("Timestamp").isoformat() if isinstance(record.get("Timestamp"), datetime) else record.get("Timestamp"),
+            "Track ID": record.get("Track ID", "-"),
+            "Song Name": record.get("Song Name", "-"),
+            "Performed by": record.get("Performed by", "-"),
+            "Written by": record.get("Written by", "-"),
+            "Produced by": record.get("Produced by", "-"),
+            "Source": record.get("Source", "-")
+        }
+        rows_to_insert.append(row)
+    errors = client.insert_rows_json(table_id, rows_to_insert)
+    if errors:
+        print(f"Encountered errors while inserting rows: {errors}")
+    else:
+        print(f"Successfully inserted {len(rows_to_insert)} rows into {table_id}.")
 
 # ---------------------------
 # Spotify Token & Helper Functions
@@ -40,7 +119,7 @@ def clean_artist_names(artist_string):
     return ', '.join(unique_artists)
 
 # ---------------------------
-# Album and Playcount + Credit Functions
+# Album, Playcount & Credit Functions
 # ---------------------------
 def get_artist_albums(artist_id, token):
     """Get up to 5 albums for a given artist using the Spotify API."""
@@ -121,7 +200,6 @@ def get_playcount_and_credit(album_id, album_name, artist_name, release_date, to
                 else:
                     credits = generate_empty_credit_result(track_id)
                 
-                # Merge playcount and credit data into a single record
                 merged_record = {
                     "Album ID": album_id,
                     "Album Name": album_name,
@@ -131,7 +209,7 @@ def get_playcount_and_credit(album_id, album_name, artist_name, release_date, to
                     "URI": uri,
                     "UID": uid,
                     "Release Date": release_date,
-                    "Timestamp": datetime.now(),  # raw datetime; converted when saving
+                    "Timestamp": datetime.now(),
                     "Track ID": track_id,
                     "Song Name": credits.get("Song Name", "-"),
                     "Performed by": credits.get("Performed by", "-"),
@@ -140,7 +218,6 @@ def get_playcount_and_credit(album_id, album_name, artist_name, release_date, to
                     "Source": credits.get("Source", "-")
                 }
                 merged_records.append(merged_record)
-                # Small delay between credit requests
                 time.sleep(0.5)
         else:
             print(f"Failed to get playcount for album {album_id}.")
@@ -148,12 +225,9 @@ def get_playcount_and_credit(album_id, album_name, artist_name, release_date, to
         print(f"Error fetching playcount for album {album_name}: {e}")
     return merged_records
 
-# ---------------------------
-# Track Credits Functions
-# ---------------------------
 def get_spotify_credits(track_id, token):
     """
-    Get credits for a Spotify track using web scraping of the internal API.
+    Get credits for a Spotify track using the internal API.
     Returns a dictionary with credit details.
     """
     try:
@@ -205,7 +279,6 @@ def get_spotify_credits(track_id, token):
                 written_by.extend(artists)
             elif 'producer' in role_name:
                 produced_by.extend(artists)
-        # Remove duplicates while preserving order
         performed_by = list(dict.fromkeys(performed_by))
         written_by = list(dict.fromkeys(written_by))
         produced_by = list(dict.fromkeys(produced_by))
@@ -233,34 +306,6 @@ def generate_empty_credit_result(track_id):
     }
 
 # ---------------------------
-# CSV Saving Function
-# ---------------------------
-def save_data_to_csv(final_data, file_name="spotify_merged_data.csv"):
-    """
-    Save the merged data to a CSV file with the following columns:
-      Album ID, Album Name, Artist Name, Track Name, Playcount, URI, UID,
-      Release Date, Timestamp, Track ID, Song Name, Performed by, Written by,
-      Produced by, Source
-    """
-    fieldnames = [
-        "Album ID", "Album Name", "Artist Name", "Track Name", "Playcount", "URI",
-        "UID", "Release Date", "Timestamp", "Track ID", "Song Name",
-        "Performed by", "Written by", "Produced by", "Source"
-    ]
-    try:
-        with open(file_name, "w", newline="", encoding="utf-8") as csvfile:
-            writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
-            writer.writeheader()
-            for record in final_data:
-                # Convert Timestamp datetime to ISO format string if needed
-                if isinstance(record.get("Timestamp"), datetime):
-                    record["Timestamp"] = record["Timestamp"].isoformat()
-                writer.writerow(record)
-        print(f"Data successfully saved to CSV file: {file_name}")
-    except Exception as e:
-        print(f"Error saving data to CSV: {str(e)}")
-
-# ---------------------------
 # Main Processing Function
 # ---------------------------
 def main():
@@ -270,11 +315,46 @@ def main():
         print("Exiting script due to missing token.")
         return
 
+    # BigQuery configuration
+    project_id = "roynet2025"
+    dataset_id = "api_dataset"
+    table_name = "spotifytable"
+    bq_client = bigquery.Client(project=project_id)
+    
+    # Validate and/or create table with expected schema
+    validate_and_create_table(bq_client, project_id, dataset_id, table_name)
+
     # List of artist IDs (Replace with your actual artist IDs)
     artist_ids = [
-        "7uIbLdzzSEqnX0Pkrb56cR"
+    "7uIbLdzzSEqnX0Pkrb56cR", "4YRxDV8wJFPHPTeXepOstw", "5T2I75UlGBcWd5nVyfmL13",
+    "71hjb5G92mGoKRSAW3Cj00", "4kq8z3vydHjPDggxb16ErB", "4zCH9qm4R2DADamUHMCa6O", "0ZvsEkINadmEV4qzS4ollh",
+    "0a1SidMjD8D6EHvJph4n2H", "2dlCuzBPpSIeyY4ZCJBKGS", "7osFcSwjlRPwxZdVALIOuC", "6dhXvR5MsnlwYguRuqoapR",
+    "0C4gtx1iHMfuaQ73GKWvtZ", "1Gh0pCAxpjw0Iq3JMoVAwO", "4FGPzWzgjURDNT7JQ8pYgH", "0vTVU0KH0CVzijsoKGsTPl",
+    "4rdJkXHNrMgowlwUdQAg8T", "4E0HD2PMY8kQJIjlShrLUS", "1J1pGfTqp5ReVIX8Z1Wzsg", "3DHtfeD4PsmR9YGhCP4VF7",
+    "4nqQTosM2Mbg7iRjvJU0N0", "47UhY4DqayBiq2gp43WOcZ", "1iCnM8foFssWlPRLfAbIwo", "67FB4n52MgexGQIG8s0yUH",
+    "2IprcYDAYTYzCl4AJH3AuT", "4EnymklUyqZwvmHQGlRssl", "6TWEX2qTj9b0bBsXSVCMKM", "0NlNru2YcUz6RbnpYGQz26",
+    "54seKvtsZauR1iauN0ptpo", "6pV5zH2LzjOUHaAvENdMMa", "6TKygPpVT29oGUogu4J9Ec", "4gvjmrtzydbMpyJaXUtwvP",
+    "1WNmfSqydnt1FDJKg3l6lw", "21YCHE0ZFflbHVTsyrCpgh", "24b0qNYNgeOfpP5rbljIB3", "0ocxWXtgr9tJW60xV5ZufT",
+    "6NvsNA4Ea62yJh7ePTS8gz", "2BPwxhCvvcb8xDl8GWIjbh", "7MxGWmiAbqjNOGmj23wbWf", "0zmxCsd8aIJHfNC95gdT2i",
+    "6P5ccCJCe8A4s9tDSTNFzF", "6fb3I3Q54izgnOMtiZbOBA",
+    # Newly added artist IDs
+    "3J4UgGSEUJOzdHkssLTHBj", "2NIfJ8TeZ3rfPIEWSPCZNy", "1IueXOQyABrMOprrzwQJWN", "0LyfQWJT6nXafLPZqxe9Of",
+    "2NoJ7NuNs9nyj8Thoh1kbu", "1nqAxAdynShWqEoMImqzto", "0Y6dVaC9DZtPNH4591M42W", "3plJVWt88EqjvtuB4ZDRV3",
+    "2oZcMYiKpjaA2Et5mU3RPP", "1xCzIWADhHc3qmVesDX7Gp", "7Hvc2DEwgI2n5lD1hk6EUx", "7BPZmKlfEYVLsuTCEzav0w",
+    "0LcJLqbBmaGUft1e9Mm8HV", "26prf4s7uhVnLIWwFKf5i6", "7DJ333ShuiNV3gwmajAVfr", "0gsJgj7k1eMp55jA0Mpyxb",
+    "0s1ec6aPpRZ4DCj15w1EFg", "0bfX8pF8kuHNCs57Ms4jZb", "6f5kUMXGROFtdAtxXZwing", "1lq29gvVmonIIomaiiafub",
+    "1DLsogyGi0pwPtwV78D8uZ", "4h11UhaLnKa6WKk8AIWYrk", "4KWTAlx2RvbpseOGMEmROg", "1uoxul8H3vteREJQfvrReR",
+    "6DhqmXo63IFrko6ZMrGfpM", "13yg8YI3uzQ9MIRb4py8Ys", "0OzxPXyowUEQ532c9AmHUR", "3b6Xu46myEwqKjHhCb5PFt",
+    "6Xb4ezwoAQC4516kI89nWz", "1YZhNFBxkEB5UKTgMDvot4", "1ZwdS5xdxEREPySFridCfh", "7ueOlHsDGBjqZfjpDj4oJO",
+    "2kEU1NNJORHNJabD0tdO1E", "7jgnJBnpZTiGnCF2Wvka2Z", "5tm3TvF1iMzxJahJJQu3qN", "778Snztf3N5DXp0kHGFl3g",
+    "2wdilDjBFjtfm30BczhsPa", "3LcyxBLuNKj7qPQnH5aTOQ", "4OqCkbr31VLuR8lpHAZvBr", "56uDOSQrD9uvMezSmBfLM4",
+    "68JafKRPdyHOelH8FFYhGv", "5oDtp2FC8VqBjTx1aT4P5j", "6U6zWkFtgM3UU5c1hBlGCD", "3Isy6kedDrgPYoTS1dazA9",
+    "6VCt6Dh7TaZF330ZFeNHv5", "6KUP1yDyDiJlpHeNts73D4", "4wes2odxtMtswRxLopJJmn", "0146m8i9zvXFasHl91avpE",
+    "2mVTkiwfm4ic6DnHpmFq8K", "5VAyiDhBinVfc6RM5RKnLa", "6Nb5kOMBK5OsZWWLwmQ0pK", "71jzN72g8qWMCMkWC5p1Z0",
+    "57K5h2Rf5M9i0buAVVBpmH"
     ]
 
+    
     final_data = []
     # Process each artist and for each album, immediately merge playcount with credit data.
     for artist_id in artist_ids:
@@ -285,8 +365,8 @@ def main():
             final_data.extend(merged_records)
             time.sleep(0.5)  # brief delay between album requests
 
-    # Save the merged records to CSV
-    save_data_to_csv(final_data)
+    # Load merged records into BigQuery
+    load_data_to_bigquery(final_data, bq_client, project_id, dataset_id, table_name)
     print("Script executed successfully!")
 
 if __name__ == '__main__':
