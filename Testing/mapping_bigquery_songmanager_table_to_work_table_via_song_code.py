@@ -66,9 +66,9 @@ def login():
     login_button = driver.find_element(By.ID, "login-button")
     
     time.sleep(1)  # Short delay to avoid bot detection
-    email_input.send_keys("monil@roynet.com")
+    email_input.send_keys("ADD EMAIL HERE")
     time.sleep(1)
-    password_input.send_keys("Jinal@619619")
+    password_input.send_keys("ADD PASSWORD HERE")
     time.sleep(1)
     login_button.click()
     print("Login process completed.")
