@@ -177,7 +177,7 @@ def hello_pubsub(cloud_event):
     print(f"Received message: {message_data}")
     
     # Initialize YouTube API client
-    youtube = googleapiclient.discovery.build("youtube", "v3", developerKey="AIzaSyDMGYaAjnwMEBKCoZsl0LO3FPU6wua1cfA")
+    youtube = googleapiclient.discovery.build("youtube", "v3", developerKey="ADD API KEY HERE")
 
     client = bigquery.Client()
     dataset_id = "api_dataset"

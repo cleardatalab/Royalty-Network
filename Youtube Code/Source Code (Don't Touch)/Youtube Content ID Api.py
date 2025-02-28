@@ -5,7 +5,7 @@ import pandas as pd
 import datetime
 
 # API Credentials
-CLIENT_SECRETS_FILE = r"client_secret_675591381646-rb1u0751t57ahohbjenvnua5semahlh8.apps.googleusercontent.com.json"
+CLIENT_SECRETS_FILE = r"CLIENT SECRET FILE"
 
 SCOPES = [
     "https://www.googleapis.com/auth/youtube.force-ssl",
@@ -13,10 +13,10 @@ SCOPES = [
     "https://www.googleapis.com/auth/youtubepartner-content-owner-readonly",
 ]
 
-CONTENT_OWNER_ID = "eJr8cU6VrR4TxH6yrsZUSQ"
+CONTENT_OWNER_ID = "CONTENT OWENER ID"
 
 # Directory Paths
-BASE_PATH = r"C:\Users\mshah\Desktop\Api\Youtube Content Api\Varun"
+BASE_PATH = r"PATH TO SAVE FILE"
 SAVE_PATH = os.path.join(BASE_PATH, "Youtube Claming")
 
 # Ensure save directory exists
