@@ -28,4 +28,4 @@ def make_commit(start_date: str, end_date: str):
     os.system('git push')
 
 # Example usage
-make_commit("01/09/2023", "31/12/2023")
+make_commit("01/01/2025", "11/03/2025")
