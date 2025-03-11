@@ -1,17 +1,17 @@
 import os
 from datetime import datetime, timedelta
 
-def make_commit(start_date: str, end_date: str):
-    # Convert input strings to datetime objects
-    start_dt = datetime.strptime(start_date, "%d/%m/%Y")
-    end_dt = datetime.strptime(end_date, "%d/%m/%Y")
-    
-    # Iterate through each day in the range
-    current_date = start_dt
-    while current_date <= end_dt:
+def make_commit(days: int):
+    if days < 1:
+        # Push the commits
+        return os.system('git push')
+    else:
+        # Calculate the date based on 'days ago'
+        target_date = datetime.now() - timedelta(days=days)
+        
         # Check if the month is in September, October, November, or December
-        if current_date.month in {9, 10, 11, 12}:
-            dates = current_date.strftime('%Y-%m-%d %H:%M:%S')
+        if target_date.month in {9, 10, 11, 12}:
+            dates = target_date.strftime('%Y-%m-%d %H:%M:%S')
             
             # Write to a file
             with open('data.txt', 'a') as file:
@@ -19,13 +19,10 @@ def make_commit(start_date: str, end_date: str):
             
             # Staging and committing with the specific date
             os.system('git add data.txt')
-            os.system(f'git commit --date="{dates}" -m "Commit for {current_date.strftime("%B %d, %Y")}"')
+            os.system(f'git commit --date="{dates}" -m "Commit for {target_date.strftime("%B %d, %Y")}"')
         
-        # Move to the next day
-        current_date += timedelta(days=1)
+        # Continue recursion
+        return make_commit(days - 1)
     
-    # Push the commits
-    os.system('git push')
-
-# Example usage
-make_commit("01/01/2025", "11/03/2025")
+# Start the commit process for the past 365 days
+make_commit(365)
